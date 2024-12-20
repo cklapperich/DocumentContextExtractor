@@ -70,20 +70,21 @@ extractor = DocumentContextExtractor(document_store, llm, keys=["context", "titl
 ```
 
 ## model selection
-The recommended model is gpt-4o-mini, whose low cost, intelligence, high rate limits, and automatic prompt caching make it absolutely perfect.
-Make sure to keep document size below the context window of your model. pre-split the documents yourself if necessary. For 4o-mini this is 128000. The extractor will warn you if a doc is too big.
-Throw $50 at openai and wait 7 days, they'll give you 2,000,000 tokens/minute on 4o-mini
 
-You're going to pay (doc_size * doc_size//chunk_size) tokens for each document in input costs, and then (num_chunks * 100) or so for output tokens.
+You need something fast, high rate limits, low cost on input tokens.
+
+Recommended models:
+
+- gpt 4o-mini
+
+- Gemini flash models
+
+- local models (would love recommendations)
+
+gpt 4o-mini is king here. The low cost, intelligence, high rate limits, and automatic prompt caching make it absolutely perfect. Throw $50 at openai and wait 7 days, they'll give you 2,000,000 tokens/minute at $0.075/mil toks.
+You're going to pay (doc_size * doc_size//chunk_size) tokens for each document in input costs, and then (num_chunks * 200) or so for output tokens.
 This means 10-50 million tokens to process Pride and Prejudice, if you dont split it into chapters first.
 
-### prompt caching with other models
-I have not been able to get anthropic/other prompt caching to work with llama_index for some reason, and can only trigger prompt caching via the Anthropic python library. GPT caching is automatic.
-Anthropic also has pretty harsh rate limits. 
-
-### alternatives to 4o-mini
-Gemini flash 2.0 or any other fast cheap model with high rate limits would work as well.
-Keep in mind input costs add up really fast with large documents.
 
 ## TODO
 - use tokencountinghandler for better token tracking / making sure I dont overstep embedding input limits? https://docs.llamaindex.ai/en/stable/examples/observability/TokenCountingHandler/
