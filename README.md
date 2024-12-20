@@ -16,6 +16,8 @@ The problem, there are tons of edge cases when trying to replicate what this at 
 
 - cost
 
+- I want to put this into a pipeline
+
 - documents too large for context window
 
 - prompt caching doesn't work via llama_index interface
