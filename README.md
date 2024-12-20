@@ -81,7 +81,7 @@ Recommended models:
 
 - long-context local models (would love recommendations)
 
-gpt 4o-mini is king here. The low cost, intelligence, high rate limits, and automatic prompt caching make it absolutely perfect. Throw $50 at openai and wait 7 days, they'll give you 2,000,000 tokens/minute at $0.075/mil toks.
+gpt 4o-mini is king here. The 128k context, low cost, intelligence, high rate limits, and automatic prompt caching make it absolutely perfect. Throw $50 at openai and wait 7 days, they'll give you 2,000,000 tokens/minute at $0.075/mil toks.
 You're going to pay (doc_size * doc_size//chunk_size) tokens for each document in input costs, and then (num_chunks * 200) or so for output tokens.
 This means 10-50 million tokens to process Pride and Prejudice, if you dont split it into chapters first.
 
