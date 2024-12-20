@@ -64,6 +64,7 @@ Gemini flash 2.0 or any other fast cheap model with high rate limits would work 
 Keep in mind input costs add up really fast with large documents.
 
 ## TODO
+- fix this bug because it prevents Llama index from working with Python 3.10
 - detect rate limits and retry with exponential backoff
 - add a TransformComponent that splits documents into smaller documents and then adds them to the docstore
     - or better yet, a TransformComponent that simply adds the nodes to the docstore and does nothing else

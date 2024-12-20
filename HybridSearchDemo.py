@@ -2,19 +2,18 @@ from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.core.storage.index_store.simple_index_store import SimpleIndexStore
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, AsyncQdrantClient
-from llama_index.embeddings.nvidia import NVIDIAEmbedding
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.openrouter import OpenRouter
 from llama_index.core.postprocessor import LLMRerank
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.storage.docstore.simple_docstore import SimpleDocumentStore
-    
+from llama_index.embeddings.openai import OpenAIEmbedding
+
 import os
-from src.DocumentContextExtractor import DocumentContextExtractor
+from DocumentContextExtractor import DocumentContextExtractor
 class HybridSearchWithContext:
-    CHUNK_SIZE = 228
+    CHUNK_SIZE = 512
     CHUNK_OVERLAP = 50
     SIMILARITY_TOP_K = 10
     SPARSE_TOP_K = 20
@@ -35,7 +34,7 @@ class HybridSearchWithContext:
         self.context_llm = OpenRouter(model="openai/gpt-4o-mini")
         self.answering_llm = OpenRouter(model="openai/gpt-4o-mini")
 
-        self.embed_model = NVIDIAEmbedding("nvidia/nv-embedqa-mistral-7b-v2", embed_batch_size=20)
+        self.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
 
         sample_embedding = self.embed_model.get_query_embedding("sample text")
         self.embed_size = len(sample_embedding)
@@ -72,8 +71,14 @@ class HybridSearchWithContext:
         )
 
         # DocumentContextExtractor requires a document store
-        self.document_context_extractor = DocumentContextExtractor(docstore=self.storage_context.docstore, llm=self.context_llm, max_context_length=128000,
-                                                                   max_contextual_tokens=228, oversized_document_strategy="truncate_first")
+        # 1st 2 arguments are required.
+        # max_contextual_tokens plus chunk_size should be a little less than the max input size of your embedding to give some headroom
+        self.document_context_extractor = DocumentContextExtractor(docstore=self.storage_context.docstore,
+                                                                   llm=self.context_llm, max_context_length=128000,
+                                                                   max_contextual_tokens=512,
+                                                                   oversized_document_strategy="truncate_first")
+
+
 
         self.index = VectorStoreIndex.from_vector_store(
             vector_store=self.vector_store,
