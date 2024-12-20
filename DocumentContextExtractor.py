@@ -11,7 +11,7 @@ import importlib
 import logging
 
 DEFAULT_CONTEXT_PROMPT: str = dedent("""
-    Please give a short brief succinct sentences to this chunk within the overall document for the purposes of improving search retrieval of the chunk. Disambiguate pronouns found in the chunk. Answer only with the succinct context and nothing else.
+Generate keywords and brief phrases describing the main topics, entities, and actions in this text. Replace pronouns with their specific referents. Format as comma-separated phrases. Exclude meta-commentary about the text itself.
     """).strip()
 
 DEFAULT_KEY: str = "context"

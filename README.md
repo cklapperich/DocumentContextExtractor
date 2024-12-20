@@ -87,6 +87,7 @@ This means 10-50 million tokens to process Pride and Prejudice, if you dont spli
 
 
 ## TODO
+- Support for Batch requests (supported by anthropic and openai) to handle truly massive amounts of documents?
 - use tokencountinghandler for better token tracking / making sure I dont overstep embedding input limits? https://docs.llamaindex.ai/en/stable/examples/observability/TokenCountingHandler/
 - fix this bug because it prevents Llama index from working with Python 3.10
 - detect rate limits and retry with exponential backoff
