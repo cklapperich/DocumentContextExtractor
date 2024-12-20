@@ -5,7 +5,7 @@ from qdrant_client import QdrantClient, AsyncQdrantClient
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.llms.openrouter import OpenRouter
+from llama_index.llms.openai import OpenAI
 from llama_index.core.postprocessor import LLMRerank
 from llama_index.core.storage.docstore.simple_docstore import SimpleDocumentStore
 from llama_index.embeddings.openai import OpenAIEmbedding
@@ -31,8 +31,8 @@ class HybridSearchWithContext:
             os.makedirs(self.index_store_path)
 
         # Load documents
-        self.context_llm = OpenRouter(model="openai/gpt-4o-mini")
-        self.answering_llm = OpenRouter(model="openai/gpt-4o-mini")
+        self.context_llm = OpenAI(model="gpt-4o-mini")
+        self.answering_llm = OpenAI(model="gpt-4o-mini")
 
         self.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
 

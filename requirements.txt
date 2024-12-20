@@ -4,6 +4,6 @@ python-dotenv
 llama_index
 llama_index_core
 
-llama-index-llms-openrouter
+llama-index-llms-openai
 llama-index-vector-stores-qdrant
 llama-index-embeddings-openai
