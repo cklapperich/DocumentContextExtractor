@@ -6,6 +6,26 @@ This repository contains a llama_index implementation of "contextual retrieval" 
 
 It implements a custom llama_index Extractor class, which can then be used in a llama index pipeline. It requires you to initialize it using a Document Store and an LLM to provide the context. It also requires you keep the documentstore up to date. 
 
+## motivation
+
+Anthropic made a 'cookbook' notebook to demo this. llama_index also made a demo of it here: https://docs.llamaindex.ai/en/stable/examples/cookbooks/contextual_retrieval
+
+The problem, there are tons of edge cases when trying to replicate what this at scale, over 100s of documents: 
+
+- rate limits are a huge problem
+
+- cost
+
+- documents too large for context window
+
+- prompt caching doesn't work via llama_index interface
+
+- error handling
+
+- chunk + context can be too big for the embedding model
+
+- and much more!
+
 ## Demo
 
 See hybridsearchdemo.py for a demo of the extractor in action with Qdrant hybrid search, effectively re-implementing the blog post.
@@ -64,6 +84,7 @@ Gemini flash 2.0 or any other fast cheap model with high rate limits would work 
 Keep in mind input costs add up really fast with large documents.
 
 ## TODO
+- use tokencountinghandler for better token tracking / making sure I dont overstep embedding input limits? https://docs.llamaindex.ai/en/stable/examples/observability/TokenCountingHandler/
 - fix this bug because it prevents Llama index from working with Python 3.10
 - detect rate limits and retry with exponential backoff
 - add a TransformComponent that splits documents into smaller documents and then adds them to the docstore
