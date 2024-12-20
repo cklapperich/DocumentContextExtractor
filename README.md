@@ -30,7 +30,7 @@ The problem, there are tons of edge cases when trying to replicate what this at 
 
 ## Demo
 
-See hybridsearchdemo.py for a demo of the extractor in action with Qdrant hybrid search, effectively re-implementing the blog post.
+See hybridsearchdemo.py for a demo of the extractor in action with Qdrant hybrid search, effectively re-implementing the blog post. All the OTHER parts of the blog post (reranking, hybrid search) are already well implemented in llama_index, in my opinion.
 
 ## Usage
 
