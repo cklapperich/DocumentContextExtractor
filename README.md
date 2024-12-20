@@ -71,7 +71,7 @@ extractor = DocumentContextExtractor(document_store, llm, keys=["context", "titl
 
 ## model selection
 
-You need something fast, high rate limits, low cost on input tokens.
+You need something fast, high rate limits, long context, low cost on input tokens.
 
 Recommended models:
 
@@ -79,7 +79,7 @@ Recommended models:
 
 - Gemini flash models
 
-- local models (would love recommendations)
+- long-context local models (would love recommendations)
 
 gpt 4o-mini is king here. The low cost, intelligence, high rate limits, and automatic prompt caching make it absolutely perfect. Throw $50 at openai and wait 7 days, they'll give you 2,000,000 tokens/minute at $0.075/mil toks.
 You're going to pay (doc_size * doc_size//chunk_size) tokens for each document in input costs, and then (num_chunks * 200) or so for output tokens.
