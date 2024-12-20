@@ -1,105 +1,95 @@
-from llama_index.core.llms import ChatMessage
-from typing import Optional, Dict, List, Tuple, Set
-from llama_index.core.llms.llm import LLM
+from llama_index.core.llms import ChatMessage, LLM
 from llama_index.core.async_utils import DEFAULT_NUM_WORKERS, run_jobs
 from llama_index.core.extractors import BaseExtractor
 from llama_index.core.schema import Document, Node
 from llama_index.core import Settings
 from llama_index.core.storage.docstore.simple_docstore import DocumentStore
+from llama_index.core.node_parser import TokenTextSplitter
+from typing import Optional, Dict, List, Tuple, Set, Union, Literal
 from textwrap import dedent
 import importlib
 import logging
 import asyncio
+import random
+
+# Type definitions
+OversizeStrategy = Literal["truncate_first", "truncate_last", "warn", "error", "ignore"]
+MetadataDict = Dict[str, str]
 
 DEFAULT_CONTEXT_PROMPT: str = dedent("""
-Generate keywords and brief phrases describing the main topics, entities, and actions in this text. Replace pronouns with their specific referents. Format as comma-separated phrases. Exclude meta-commentary about the text itself.
-    """).strip()
+Generate keywords and brief phrases describing the main topics, entities, and actions in this text. 
+Replace pronouns with their specific referents. Format as comma-separated phrases. 
+Exclude meta-commentary about the text itself.
+""").strip()
 
 DEFAULT_KEY: str = "context"
-from llama_index.core.node_parser import TokenTextSplitter
 
 class DocumentContextExtractor(BaseExtractor):
+    """
+    Extracts contextual information from documents using LLM-based analysis.
+    
+    This extractor processes documents and their nodes to generate contextual metadata,
+    handling rate limits and large documents according to specified strategies.
+    
+    Attributes:
+        keys (List[str]): Keys used to store extracted context in metadata
+        prompts (List[str]): Prompts used for context extraction
+        llm (LLM): Language model instance for generating context
+        docstore (DocumentStore): Storage for document data
+        doc_ids (Set[str]): Set of processed document IDs
+        max_context_length (int): Maximum allowed context length in tokens
+        max_contextual_tokens (int): Maximum tokens for generated context
+        oversized_document_strategy (OversizeStrategy): Strategy for handling large documents
+    """
+    
+    # Pydantic fields
+    llm: LLM
+    docstore: DocumentStore
     keys: List[str]
     prompts: List[str]
-    llm: LLM
-    docstore:DocumentStore
-    doc_ids: Set
-    max_context_length:int
-    max_contextual_tokens:int
-    oversized_document_strategy:str
+    doc_ids: Set[str]
+    max_context_length: int
+    max_contextual_tokens: int
+    oversized_document_strategy: OversizeStrategy
 
-    @staticmethod
-    def _truncate_text(text:str, max_token_count:int, how='first')-> str:
+    def __init__(
+        self,
+        docstore: DocumentStore,
+        llm: LLM,
+        keys: Optional[Union[str, List[str]]] = None,
+        prompts: Optional[Union[str, List[str]]] = None,
+        num_workers: int = DEFAULT_NUM_WORKERS,
+        max_context_length: int = 128000,
+        max_contextual_tokens: int = 512,
+        oversized_document_strategy: OversizeStrategy = "truncate_first",
+        **kwargs
+    ) -> None:
         """
-        Truncate the document to the specified token coutn
-        :param document: The document to get the text of.
-        :param max_token_count: The maximum number of tokens to return.
-        :param how: How to truncate the document. Can be 'first' or 'last'.
-        :return: The text of the documen
-        """
-
-        text_splitter = TokenTextSplitter(chunk_size=max_token_count, chunk_overlap=0)
-        chunks = text_splitter.split_text(text)
-        if how == 'first':
-            text = chunks[0]
-        elif how == 'last':
-            text = chunks[-1]
-        else:
-            raise ValueError("Invalid truncation method. Must be 'first' or 'last'.")
+        Initialize the DocumentContextExtractor.
         
-        return text if text else ""
-    
-    def _count_tokens(text:str)->int:
-        """
-        Get the number of tokens in the document.
-        :param document: The document to get the number of tokens of.
-        :return: The number of tokens in the document
-        """
-        text_splitter = TokenTextSplitter(chunk_size=1, chunk_overlap=0)
-        tokens = text_splitter.split_text(text)
-        token_count = len(tokens)
-        return token_count
-            
-    def __init__(self, docstore:DocumentStore, keys=None, prompts=None, llm: LLM = None,
-                 num_workers: int = DEFAULT_NUM_WORKERS, max_context_length:int = 128000,
-                 max_contextual_tokens:int = 512,
-                 oversized_document_strategy = "truncate_first",
-                 **kwargs):
-        """
         Args:
-            docstore (DocumentStore): DocumentStore to extract from
-            keys (List[str]): List of keys to extract context for
-            prompts (List[str]): List of prompts to use for context extraction
-            llm (LLM): LLM to use for context extraction
-            num_workers (int): Number of workers to use for context extraction
-            max_context_length (int): Maximum context length to use for context extraction
-            max_contextual_tokens (int): Maximum contextual tokens to use for context extraction
-            oversized_document_strategy (str): Strategy to use for documents < max_context_length:
-                "truncate_first" - Truncate the document from top down
-                "truncate_last" - Truncate the document from bottom up
-                "warn" - Warn about the oversized document
-                "error" - Raise an error for the oversized document
-                "ignore" - Ignore the oversized document
-            **kwargs: Additional keyword arguments based to BaseExtractor
+            docstore: DocumentStore llama_index object, database for storing the parent documents of the incoming nodes.
+            keys: Key(s) for storing extracted context
+            prompts: Prompt(s) for context extraction
+            llm: Language model for generating context
+            num_workers: Number of parallel workers
+            max_context_length: Maximum document context length
+            max_contextual_tokens: Maximum tokens in generated context
+            oversized_document_strategy: How to handle documents exceeding max_context_length
+            **kwargs: Additional parameters for BaseExtractor
+            
+        Raises:
+            ValueError: If tiktoken is not installed or if invalid strategy is provided
         """
-
-        # check if 'tiktoken' is installed and if not warn that token counts will be less  accurate
         if not importlib.util.find_spec("tiktoken"):
             raise ValueError("TikToken is required for DocumentContextExtractor. Please install tiktoken.")
 
-        # Process defaults and values first
-        keys = keys or [DEFAULT_KEY]
-        prompts = prompts or [DEFAULT_CONTEXT_PROMPT]
-
-        if isinstance(keys, str):
-            keys = [keys]
-        if isinstance(prompts, str):
-            prompts = [prompts]
-    
+        # Process input parameters
+        keys = [keys] if isinstance(keys, str) else (keys or [DEFAULT_KEY])
+        prompts = [prompts] if isinstance(prompts, str) else (prompts or [DEFAULT_CONTEXT_PROMPT])
         llm = llm or Settings.llm
-        doc_ids = set()
+        doc_ids: Set[str] = set()
 
-        # Call super().__init__ at the end with all processed values
         super().__init__(
             keys=keys,
             prompts=prompts,
@@ -113,21 +103,78 @@ class DocumentContextExtractor(BaseExtractor):
             **kwargs
         )
 
-    async def _agenerate_node_context(self, node, metadata, document, prompt, key)->Dict:
+    @staticmethod
+    def _truncate_text(
+        text: str,
+        max_token_count: int,
+        how: Literal['first', 'last'] = 'first'
+    ) -> str:
         """
-        Generate node context using the provided LLM, with error handling and exponential backoff.
-
-        Args:
-            node (Node): The node to generate context for.
-            metadata (Dict): The metadata dictionary to update.
-            document (Document): The document containing the node.
-            prompt (str): The prompt to use for generating context.
-            key (str): The key to use for storing the generated context.
-
-        Returns:
-            Dict: The updated metadata dictionary.
-        """
+        Truncate text to specified token count from either start or end.
         
+        Args:
+            text: Text to truncate
+            max_token_count: Maximum number of tokens to keep
+            how: Whether to keep first or last portion
+            
+        Returns:
+            Truncated text string
+            
+        Raises:
+            ValueError: If invalid truncation method specified
+        """
+        text_splitter = TokenTextSplitter(chunk_size=max_token_count, chunk_overlap=0)
+        chunks = text_splitter.split_text(text)
+        
+        if not chunks:
+            return ""
+            
+        if how == 'first':
+            return chunks[0]
+        elif how == 'last':
+            return chunks[-1]
+            
+        raise ValueError("Invalid truncation method. Must be 'first' or 'last'.")
+
+    @staticmethod
+    def _count_tokens(text: str) -> int:
+        """
+        Count tokens in text using TokenTextSplitter.
+        
+        Args:
+            text: Text to count tokens in
+            
+        Returns:
+            Number of tokens in text
+        """
+        text_splitter = TokenTextSplitter(chunk_size=1, chunk_overlap=0)
+        tokens = text_splitter.split_text(text)
+        return len(tokens)
+
+    async def _agenerate_node_context(
+        self,
+        node: Node,
+        metadata: MetadataDict,
+        document: Document,
+        prompt: str,
+        key: str
+    ) -> MetadataDict:
+        """
+        Generate context for a node using LLM with retry logic.
+        
+        Args:
+            node: Node to generate context for
+            metadata: Metadata dictionary to update
+            document: Parent document containing node
+            prompt: Prompt for context generation
+            key: Key for storing generated context
+            
+        Returns:
+            Updated metadata dictionary
+            
+        Note:
+            Implements exponential backoff for rate limit handling
+        """
         cached_text = f"<document>{document.text}</document>"
         messages = [
             ChatMessage(
@@ -139,7 +186,7 @@ class DocumentContextExtractor(BaseExtractor):
                         "cache_control": {"type": "ephemeral"},
                     },
                     {
-                        "text":  f"Here is the chunk we want to situate within the whole document:\n<chunk>{node.text}</chunk>\n{prompt}",
+                        "text": f"Here is the chunk we want to situate within the whole document:\n<chunk>{node.text}</chunk>\n{prompt}",
                         "block_type": "text",
                     },
                 ],
@@ -147,8 +194,8 @@ class DocumentContextExtractor(BaseExtractor):
         ]
 
         max_retries = 5
-        base_delay = 60  # Starting delay in seconds
-        
+        base_delay = 60
+
         for attempt in range(max_retries):
             try:
                 response = await self.llm.achat(
@@ -156,65 +203,71 @@ class DocumentContextExtractor(BaseExtractor):
                     max_tokens=self.max_contextual_tokens,
                     extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
                 )
-                response_text = response.message.blocks[0].text
-                metadata[key] = response_text
+                metadata[key] = response.message.blocks[0].text
                 return metadata
 
             except Exception as e:
-                # Check if it's a rate limit error (you may need to adjust this based on the actual error type/message)
                 is_rate_limit = any(
-                    message in str(e).lower() 
+                    message in str(e).lower()
                     for message in ["rate limit", "too many requests", "429"]
                 )
 
+                if is_rate_limit and attempt < max_retries - 1:
+                    delay = (base_delay * (2 ** attempt)) + (random.random() * 0.5)
+                    logging.warning(
+                        f"Rate limit hit, retrying in {delay:.1f} seconds "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                
                 if is_rate_limit:
-                    if attempt < max_retries - 1:  # Don't sleep on the last attempt
-                        delay = (base_delay * (2 ** attempt)) + (random.random() * 0.5)  # Add jitter
-                        logging.warning(f"Rate limit hit, retrying in {delay:.1f} seconds (attempt {attempt + 1}/{max_retries})")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        logging.error(f"Failed after {max_retries} retries due to rate limiting")
+                    logging.error(f"Failed after {max_retries} retries due to rate limiting")
                 else:
-                    # For non-rate-limit errors, log a warning and return empty/default metadata
                     logging.warning(f"Error generating context for node {node.node_id}: {str(e)}")
                 
                 return metadata
-    
-    async def aextract(self, nodes) -> List[Dict]:
-        # Extract node-level summary metadata
-        metadata_list: List[Dict] = [{} for _ in nodes]
-        # we need to preserve the order of the nodes, but process the nodes out-of-order
+
+    async def aextract(self, nodes: List[Node]) -> List[MetadataDict]:
+        """
+        Extract context for multiple nodes asynchronously.
+        
+        Args:
+            nodes: List of nodes to process
+            
+        Returns:
+            List of metadata dictionaries with generated context
+            
+        Note:
+            Handles document size limits according to oversized_document_strategy
+        """
+        metadata_list = [{} for _ in nodes]
         metadata_map = {node.node_id: metadata_dict for metadata_dict, node in zip(metadata_list, nodes)}
 
-        source_doc_ids = set([node.source_node.node_id for node in nodes])
+        source_doc_ids = {node.source_node.node_id for node in nodes if node.source_node}
+        doc_id_to_nodes: Dict[str, List[Node]] = {}
 
-        # make a mapping of doc id: node
-        doc_id_to_nodes = {}
         for node in nodes:
-            if not (node.source_node and (node.source_node.node_id in source_doc_ids)):
+            if not (node.source_node and node.source_node.node_id in source_doc_ids):
                 continue
             parent_id = node.source_node.node_id
-            
-            if parent_id not in doc_id_to_nodes:
-                doc_id_to_nodes[parent_id] = []
-            doc_id_to_nodes[parent_id].append(node)
+            doc_id_to_nodes.setdefault(parent_id, []).append(node)
 
-        i = 0
         for doc_id in source_doc_ids:
             doc = self.docstore.get_document(doc_id)
 
-            # warn trim or raise an error per the document strategy
             if self.max_context_length is not None:
-                token_count = DocumentContextExtractor._count_tokens(doc.text)
+                token_count = self._count_tokens(doc.text)
                 if token_count > self.max_context_length:
-                    message = f"Document {doc.id} is too large ({token_count} tokens) to be processed. Doc metadata: {doc.metadata}"
-                
-                    if self.oversized_document_strategy == "truncate_first":
-                        doc.text = DocumentContextExtractor._truncate_text(doc.text, self.max_context_length, how='first')
-                    if self.oversized_document_strategy == "truncate_last":
-                        doc.text = DocumentContextExtractor._truncate_text(doc.text, self.max_context_length, how='last')
+                    message = (
+                        f"Document {doc.id} is too large ({token_count} tokens) "
+                        f"to be processed. Doc metadata: {doc.metadata}"
+                    )
 
+                    if self.oversized_document_strategy == "truncate_first":
+                        doc.text = self._truncate_text(doc.text, self.max_context_length, 'first')
+                    elif self.oversized_document_strategy == "truncate_last":
+                        doc.text = self._truncate_text(doc.text, self.max_context_length, 'last')
                     elif self.oversized_document_strategy == "warn":
                         logging.warning(message)
                     elif self.oversized_document_strategy == "error":
@@ -224,19 +277,17 @@ class DocumentContextExtractor(BaseExtractor):
                     else:
                         raise ValueError(f"Unknown oversized document strategy: {self.oversized_document_strategy}")
 
-            node_summaries_jobs = []
-            for prompt, key in list(zip(self.prompts, self.keys)):
-                for node in doc_id_to_nodes.get(doc_id,[]):
-                    i += 1
-                    metadata_dict = metadata_map[node.node_id]
-                    node_summaries_jobs.append(self._agenerate_node_context(node, metadata_dict, doc, prompt, key))
+            node_summaries_jobs = [
+                self._agenerate_node_context(node, metadata_map[node.node_id], doc, prompt, key)
+                for prompt, key in zip(self.prompts, self.keys)
+                for node in doc_id_to_nodes.get(doc_id, [])
+            ]
 
-            new_metadata = await run_jobs(
+            await run_jobs(
                 node_summaries_jobs,
                 show_progress=self.show_progress,
                 workers=self.num_workers,
             )
-            print(f"Jobs built. requesting {len(node_summaries_jobs)} nodes with {self.num_workers} workers.")
+            logging.info(f"Processed {len(node_summaries_jobs)} nodes with {self.num_workers} workers.")
 
-        print(metadata_list)
         return metadata_list
