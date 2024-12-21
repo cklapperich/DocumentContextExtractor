@@ -82,25 +82,6 @@ class DocumentContextExtractor(BaseExtractor):
         tiktoken_encoder: str = "cl100k_base",
         **kwargs
     ) -> None:
-        """
-        Initialize the DocumentContextExtractor.
-        
-        Args:
-            docstore: DocumentStore llama_index object, database for storing the parent documents of the incoming nodes.
-            keys: Key(s) for storing extracted context
-            prompts: Prompt(s) for context extraction
-            llm: Language model for generating context
-            num_workers: Number of parallel workers
-            max_context_length: Maximum document context length
-            max_contextual_tokens: Maximum tokens in generated context
-            oversized_document_strategy: How to handle documents exceeding max_context_length
-            warn_on_oversize: Whether to log warnings for oversized documents
-            tiktoken_encoder: Name of the tiktoken encoder to use
-            **kwargs: Additional parameters for BaseExtractor
-            
-        Raises:
-            ValueError: If tiktoken is not installed or if invalid strategy is provided
-        """
         if not importlib.util.find_spec("tiktoken"):
             raise ValueError("TikToken is required for DocumentContextExtractor. Please install tiktoken.")
 
