@@ -12,6 +12,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 
 import os
 from DocumentContextExtractor import DocumentContextExtractor
+
 class HybridSearchWithContext:
     CHUNK_SIZE = 512
     CHUNK_OVERLAP = 50
@@ -128,6 +129,9 @@ class HybridSearchWithContext:
 
         return response
     
+
+
+
 if __name__=='__main__':
     from dotenv import load_dotenv
     load_dotenv()
