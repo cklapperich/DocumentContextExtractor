@@ -4,7 +4,6 @@ from llama_index.core.extractors import BaseExtractor
 from llama_index.core.schema import Document, Node
 from llama_index.core import Settings
 from llama_index.core.storage.docstore.simple_docstore import DocumentStore
-from llama_index.core.node_parser import TokenTextSplitter
 from typing import Optional, Dict, List, Tuple, Set, Union, Literal, Any
 from textwrap import dedent
 import importlib
@@ -27,13 +26,38 @@ DEFAULT_KEY: str = "context"
 
 class DocumentContextExtractor(BaseExtractor):
     """
-    Extracts contextual information from documents chunks using LLM-based analysis for enhanced RAG accuracy. Based on the Anthropic "Contextual Retrieval" blog post. 
+    An LLM-based context extractor for enhancing RAG accuracy through document analysis.
+    
     This extractor processes documents and their nodes to generate contextual metadata,
-    handling rate limits and large documents according to specified strategies.
+    implementing the approach described in the Anthropic "Contextual Retrieval" blog post.
+    It handles rate limits, document size constraints, and parallel processing of nodes.
+    
+    Attributes:
+        llm (LLM): Language model instance for generating context
+        docstore (DocumentStore): Storage for parent documents
+        key (str): Metadata key for storing extracted context
+        prompt (str): Prompt template for context generation
+        doc_ids (Set[str]): Set of processed document IDs
+        max_context_length (int): Maximum allowed document context length
+        max_contextual_tokens (int): Maximum tokens in generated context
+        oversized_document_strategy (OversizeStrategy): Strategy for handling large documents
+        warn_on_oversize (bool): Whether to log warnings for oversized documents
+        tiktoken_encoder (str): Name of the tiktoken encoding to use
+        
+    Example:
+        ```python
+        extractor = DocumentContextExtractor(
+            docstore=my_docstore,
+            llm=my_llm,
+            max_context_length=64000,
+            max_contextual_tokens=256
+        )
+        metadata_list = await extractor.aextract(nodes)
+        ```
     """
     
     # Pydantic fields
-    llm: Any
+    llm: LLM
     docstore: DocumentStore
     key: str
     prompt: str
@@ -70,6 +94,8 @@ class DocumentContextExtractor(BaseExtractor):
             max_context_length: Maximum document context length
             max_contextual_tokens: Maximum tokens in generated context
             oversized_document_strategy: How to handle documents exceeding max_context_length
+            warn_on_oversize: Whether to log warnings for oversized documents
+            tiktoken_encoder: Name of the tiktoken encoder to use
             **kwargs: Additional parameters for BaseExtractor
             
         Raises:
@@ -98,46 +124,62 @@ class DocumentContextExtractor(BaseExtractor):
             **kwargs
         )
 
+    # this can take a surprisingly long time on longer docs so we cache it. For oversized docs, we end up counting twice, the 2nd time withotu the cache.
+    # but if you're repeateddly running way oversize docs, the time that takes wont be what matters anyways.
     @staticmethod
     @lru_cache(maxsize=1000)
     def _count_tokens(text: str, encoder:str="cl100k_base") -> int:
+        """
+        This can take a surprisingly long time on longer docs so we cache it, and we need to call it on every doc, regardless of size.
+        """
         encoding = tiktoken.get_encoding(encoder)
         return len(encoding.encode(text))
 
     @staticmethod
+    @lru_cache(maxsize=10)
     def _truncate_text(text: str, max_token_count: int, how: Literal['first', 'last'] = 'first', encoder="cl100k_base") -> str:
+        """
+        This can take a couple seconds. A small cache is nice here because the async calls will mostly happen in-order. If you DO hit an oversized document,
+        you would otherwise be re-truncating 1000s of times as you procses through each chunk in your 200+ document.
+        """
         encoding = tiktoken.get_encoding(encoder)
         tokens = encoding.encode(text)
         
         if how == 'first':
             truncated_tokens = tokens[:max_token_count]
-        else:  # last
+        else:  # 'last'
             truncated_tokens = tokens[-max_token_count:]
             
         return encoding.decode(truncated_tokens)
 
     async def _agenerate_node_context(
-        self,
-        node: Node,
-        metadata: MetadataDict,
-        document: Document,
-        prompt: str,
-        key: str
+    self,
+    node: Node,
+    metadata: MetadataDict,
+    document: Document,
+    prompt: str,
+    key: str
     ) -> MetadataDict:
         """
         Generate context for a node using LLM with retry logic.
-        Implements exponential backoff for rate limit handling. Uses prompt caching when available.
+        
+        Implements exponential backoff for rate limit handling and uses prompt
+        caching when available. The function retries on rate limits and handles
+        various error conditions gracefully.
         
         Args:
             node: Node to generate context for
             metadata: Metadata dictionary to update
-            document: Parent document containing node
-            prompt: Prompt for context generation
-            key: Key for storing generated context
+            document: Parent document containing the node
+            prompt: Prompt template for context generation
+            key: Metadata key for storing generated context
             
         Returns:
-            Updated metadata dictionary
-
+            Updated metadata dictionary with generated context
+            
+        Note:
+            Uses exponential backoff starting at 60 seconds with up to 5 retries
+            for rate limit handling.
         """
         cached_text = f"<document>{document.text}</document>"
         messages = [
@@ -191,12 +233,44 @@ class DocumentContextExtractor(BaseExtractor):
                     logging.warning(f"Error generating context for node {node.node_id}: {str(e)}")
                 
                 return metadata
+    
+    async def _get_document(self, doc_id: str) -> Document:
+        """counting tokens can be slow, as can awaiting the docstore (potentially), so we keep a small lru_cache"""
+
+        # first we need to get the document
+        doc = await self.docstore.aget_document(doc_id)
+
+        # then truncate if necessary. 
+        if self.max_context_length is not None:
+            strategy = self.oversized_document_strategy
+            token_count = self._count_tokens(doc.text, self.tiktoken_encoder)
+            if token_count > self.max_context_length:
+                message = (
+                    f"Document {doc.id} is too large ({token_count} tokens) "
+                    f"to be processed. Doc metadata: {doc.metadata}"
+                )
+                
+                if self.warn_on_oversize:
+                    logging.warning(message)
+
+                if strategy == "truncate_first":
+                    doc.text = self._truncate_text(doc.text, self.max_context_length, 'first', self.tiktoken_encoder)
+                elif strategy == "truncate_last":
+                    doc.text = self._truncate_text(doc.text, self.max_context_length, 'last', self.tiktoken_encoder)                    
+                elif strategy == "error":
+                    raise ValueError(message)
+                elif strategy == "ignore":
+                    return
+                else:
+                    raise ValueError(f"Unknown oversized document strategy: {strategy}")
             
+        return doc
+        
     async def aextract(self, nodes: List[Node]) -> List[MetadataDict]:
         """
         Extract context for multiple nodes asynchronously, optimized for loosely ordered nodes.
         Processes each node independently without guaranteeing sequential document handling.
-        Includes LRU caching for document fetching.
+        Nodes will be *mostly* processed in document-order assuming nodes get passed in document-order.
         
         Args:
             nodes: List of nodes to process, ideally grouped by source document
@@ -208,37 +282,6 @@ class DocumentContextExtractor(BaseExtractor):
         metadata_map = {node.node_id: metadata_dict for metadata_dict, node in zip(metadata_list, nodes)}        
 
 
-        async def _get_document(doc_id: str) -> Document:
-            """counting tokens can be slow, as can awaiting the docstore (potentially), so we keep a small lru_cache"""
-
-            # first we need to get the document
-            doc = await self.docstore.aget_document(doc_id)
-
-            # then truncate if necessary. 
-            if self.max_context_length is not None:
-                strategy = self.oversized_document_strategy
-                token_count = self._count_tokens(doc.text, self.tiktoken_encoder)
-                if token_count > self.max_context_length:
-                    message = (
-                        f"Document {doc.id} is too large ({token_count} tokens) "
-                        f"to be processed. Doc metadata: {doc.metadata}"
-                    )
-                    
-                    if self.warn_on_oversize:
-                        logging.warning(message)
-
-                    if strategy == "truncate_first":
-                        doc.text = self._truncate_text(doc.text, self.max_context_length, 'first', self.tiktoken_encoder)
-                    elif strategy == "truncate_last":
-                        doc.text = self._truncate_text(doc.text, self.max_context_length, 'last', self.tiktoken_encoder)                    
-                    elif strategy == "error":
-                        raise ValueError(message)
-                    elif strategy == "ignore":
-                        return
-                    else:
-                        raise ValueError(f"Unknown oversized document strategy: {strategy}")
-                
-            return doc
 
         # iterate over all the nodes and generate the jobs
         node_tasks = []
@@ -246,7 +289,7 @@ class DocumentContextExtractor(BaseExtractor):
             if not node.source_node:
                 return
 
-            doc = await _get_document(node.source_node.node_id)
+            doc = await self._get_document(node.source_node.node_id)
 
             if not doc:
                 continue
