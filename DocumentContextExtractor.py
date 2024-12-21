@@ -262,8 +262,6 @@ class DocumentContextExtractor(BaseExtractor):
         metadata_list = [{} for _ in nodes]
         metadata_map = {node.node_id: metadata_dict for metadata_dict, node in zip(metadata_list, nodes)}        
 
-
-
         # iterate over all the nodes and generate the jobs
         node_tasks = []
         for node in nodes:
