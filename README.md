@@ -87,6 +87,7 @@ This means 10-50 million tokens to process Pride and Prejudice, if you dont spli
 
 
 ## TODO
+- TEST 'succinct' prompt performance vs 'full' prompt performance!
 - Support for Batch requests (supported by anthropic and openai) to handle truly massive amounts of documents?
 - fix this bug because it prevents Llama index from working with Python 3.10: https://github.com/run-llama/llama_index/discussions/14351
 - add a TransformComponent that splits documents into smaller documents and then adds them to the docstore
