@@ -1,4 +1,5 @@
-# Document Context Retrieval
+
+# DEPRECATED. THIS HAS NOW BEEN MERGED INTO LLAMA_INDEX. PLEASE USE LLAMA_INDEX.CORE.EXTRACTORS.DocumentContextExtractor https://github.com/run-llama/llama_index/pull/17367
 
 ## Summary
 
